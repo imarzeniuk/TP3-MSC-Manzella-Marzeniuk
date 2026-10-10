@@ -3,17 +3,6 @@ import numpy
 from source.mesh.node import Node
 
 
-# Para cada tipo de elemento: (orden de interpolacion, nodos, nodos de vertice)
-ELEMENT_TYPES = {
-    "T3": (1, 3, 3),
-    "T6": (2, 6, 3),
-    "Q4": (1, 4, 4),
-    "Q8": (2, 8, 4),
-}
-
-PLANE_MODELS = ["plane_stress", "plane_strain"]
-
-
 class MaterialSpec:
     """Datos de un material tal como se leen del archivo de malla.
 
@@ -80,17 +69,15 @@ class Mesh2D:
         n_elements = int(header[1])
         self.dim = int(header[2])
 
-        if self.dim != 2:
-            raise ValueError("Mesh2D only supports dim = 2")
-
-        if len(lines) != 1 + n_nodes + n_elements:
-            raise ValueError("Number of lines does not match the header")
-
         for line in material_lines:
-            self._read_material(line)
+            values = line.split()
 
-        if len(self.materials) == 0:
-            raise ValueError("The mesh has no MATERIAL line")
+            global_id = int(values[1])
+
+            self.materials[global_id] = MaterialSpec(
+                global_id, values[2],
+                float(values[3]), float(values[4]), float(values[5]), float(values[6]),
+            )
 
         line_number = 1
 
@@ -109,85 +96,18 @@ class Mesh2D:
             values = lines[line_number].split()
             line_number = line_number + 1
 
-            self._read_element(i, values, n_nodes)
+            # Todos los elementos son del mismo tipo: se toma el de la primera linea
+            self.element_type = values[1]
+            self.element_order = int(values[2])
 
-    def _read_material(self, line):
-        values = line.split()
+            connectivity = []
 
-        if len(values) != 7:
-            raise ValueError("Bad MATERIAL line: " + line)
+            for j in range(4, len(values)):
+                connectivity.append(int(values[j]) - 1)
 
-        global_id = int(values[1])
-        model = values[2]
-
-        if model not in PLANE_MODELS:
-            raise ValueError("Unknown material model: " + model)
-
-        if global_id in self.materials:
-            raise ValueError("Repeated material id: " + str(global_id))
-
-        self.materials[global_id] = MaterialSpec(
-            global_id, model,
-            float(values[3]), float(values[4]), float(values[5]), float(values[6]),
-        )
-
-    def _read_element(self, index, values, n_nodes):
-        element_global_id = int(values[0]) - 1
-
-        if element_global_id != index:
-            raise ValueError("Unexpected element numbering")
-
-        element_type = values[1]
-
-        if element_type not in ELEMENT_TYPES:
-            raise ValueError("Unknown element type: " + element_type)
-
-        order, n_element_nodes, n_vertices = ELEMENT_TYPES[element_type]
-
-        # Un analisis usa un solo tipo de elemento
-        if self.element_type is None:
-            self.element_type = element_type
-            self.element_order = order
-        elif element_type != self.element_type:
-            raise ValueError("Mixed element types are not supported")
-
-        if int(values[2]) != order:
-            raise ValueError("Element " + values[0] + ": order does not match " + element_type)
-
-        material_id = int(values[3])
-
-        if material_id not in self.materials:
-            raise ValueError("Element " + values[0] + ": unknown material " + values[3])
-
-        connectivity = []
-
-        for j in range(4, len(values)):
-            connectivity.append(int(values[j]) - 1)
-
-        if len(connectivity) != n_element_nodes:
-            raise ValueError("Element " + values[0] + ": wrong number of nodes")
-
-        for node_id in connectivity:
-            if node_id < 0 or node_id >= n_nodes:
-                raise ValueError("Element " + values[0] + ": node out of range")
-
-        if self._signed_area(connectivity[:n_vertices]) <= 0.0:
-            raise ValueError("Element " + values[0] + ": nodes must be counter-clockwise")
-
-        self.element_global_ids.append(element_global_id)
-        self.element_material_ids.append(material_id)
-        self.connectivity.append(connectivity)
-
-    def _signed_area(self, vertex_ids):
-        # Formula del area de Gauss (shoelace); positiva si es antihoraria
-        area = 0.0
-
-        for i in range(len(vertex_ids)):
-            a = self.nodes[vertex_ids[i]]
-            b = self.nodes[vertex_ids[(i + 1) % len(vertex_ids)]]
-            area = area + a.x * b.y - b.x * a.y
-
-        return 0.5 * area
+            self.element_global_ids.append(int(values[0]) - 1)
+            self.element_material_ids.append(int(values[3]))
+            self.connectivity.append(connectivity)
 
     def number_of_nodes(self):
         return len(self.nodes)

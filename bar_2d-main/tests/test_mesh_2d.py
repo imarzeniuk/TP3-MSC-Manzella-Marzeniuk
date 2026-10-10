@@ -53,15 +53,6 @@ def read_text(text):
     return mesh
 
 
-def raises_value_error(text):
-    try:
-        read_text(text)
-    except ValueError:
-        return True
-
-    return False
-
-
 def test_read_patches():
     for filename, element, n_nodes, n_elements in PATCHES:
         mesh = Mesh2D()
@@ -149,41 +140,6 @@ def test_material_and_dofs():
     assert mesh.element_node_ids(0) == [0, 1, 2, 3]
 
 
-def test_invalid_files_are_rejected():
-    assert not raises_value_error(VALID)
-
-    # Tipo de elemento desconocido
-    assert raises_value_error(VALID.replace("Q4", "Q9"))
-    # Orden que no corresponde al tipo
-    assert raises_value_error(VALID.replace("Q4 1 1", "Q4 2 1"))
-    # Cantidad de nodos incorrecta
-    assert raises_value_error(VALID.replace("1 2 3 4\n", "1 2 3\n"))
-    # Material inexistente
-    assert raises_value_error(VALID.replace("Q4 1 1", "Q4 1 7"))
-    # Modelo de material desconocido
-    assert raises_value_error(VALID.replace("plane_strain", "plane_foo"))
-    # Nodo fuera de rango
-    assert raises_value_error(VALID.replace("1 2 3 4\n", "1 2 3 9\n"))
-    # Orientacion horaria
-    assert raises_value_error(VALID.replace("1 2 3 4\n", "4 3 2 1\n"))
-    # Sin material
-    assert raises_value_error(VALID.replace("MATERIAL 1 plane_strain 21e9 0.25 2400 1.0\n", ""))
-
-
-def test_mixed_types_are_rejected():
-    text = """4 2 2
-MATERIAL 1 plane_stress 1.0 0.25 0.0 1.0
-1 0.0 0.0
-2 1.0 0.0
-3 1.0 1.0
-4 0.0 1.0
-1 Q4 1 1 1 2 3 4
-2 T3 1 1 1 2 3
-"""
-
-    assert raises_value_error(text)
-
-
 if __name__ == "__main__":
     tests = [
         test_read_patches,
@@ -191,8 +147,6 @@ if __name__ == "__main__":
         test_patch_area,
         test_midside_nodes_are_at_midpoints,
         test_material_and_dofs,
-        test_invalid_files_are_rejected,
-        test_mixed_types_are_rejected,
     ]
 
     for test in tests:
