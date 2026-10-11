@@ -3,7 +3,7 @@
 637 288 2
 
 # MATERIAL material_id model E nu rho thickness
-MATERIAL 1 plane_strain 21000000000.0 0.25 2400.0 1.0
+MATERIAL 1 plane_strain 21000000000.0 0.2 2400.0 1.0
 
 # node_number x y
 1 0.0 0.0

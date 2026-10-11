@@ -29,10 +29,12 @@ source/
   mesh/                Mesh2D: lector del formato .mesh
   systems/             numeración de DOFs, matriz global, condiciones de borde
   solvers/             resolución del sistema lineal
+  postprocess/         resultantes de reacciones, control de la base y estática a mano
   output/              escritura de .vtu para ParaView
 tests/                 un archivo de tests por módulo, más el patch test
 meshes/                mallas de los patch tests y de la presa
 dam_mesh.py            generador de las mallas de la presa
+dam.py                 presa con la base empotrada: solución, reacciones y .vtu
 read_mesh/             convertidor de mallas de NX/Nastran (en desarrollo)
 ```
 
@@ -71,3 +73,23 @@ o todos juntos con `pytest` si está instalado. Regenerar las mallas de la presa
 ```
 python dam_mesh.py
 ```
+
+## Presa con la base empotrada
+
+```
+python dam.py                                  # usa meshes/dam_q8.mesh
+python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --freeboard 2
+```
+
+Fija u = v = 0 en todos los nodos de la base (y = 0), aplica el peso propio y la presión
+hidrostática, resuelve y calcula las reacciones `R = K u − f`. Imprime:
+
+- la suma de reacciones y su momento respecto del pie, comparados con la estática a mano
+  (peso, empuje, momento estabilizante y desestabilizante, factor de seguridad al vuelco y
+  rozamiento mínimo);
+- el equilibrio global entre reacciones y cargas;
+- una tabla con las reacciones de cada nodo de la base, marcando los nodos traccionados o
+  con `|R_x| > μ R_y`, donde el empotramiento deja de equivaler a un apoyo con rozamiento.
+
+Al final escribe `results/<malla>.vtu` con la configuración deformada (`--scale` es el factor
+de escala), para abrir en ParaView.
