@@ -11,18 +11,15 @@ import tempfile
 import numpy
 
 from source.mesh.mesh_2d import Mesh2D
-from source.reference_elements.t3 import T3
-from source.reference_elements.q4 import Q4
-from source.reference_elements.t6 import T6
-from source.reference_elements.q8 import Q8
+from source.reference_elements import make_reference_element
 
 
 # (archivo, elemento de referencia, cantidad de nodos, cantidad de elementos)
 PATCHES = [
-    ("meshes/patch_t3.mesh", T3(), 16, 18),
-    ("meshes/patch_q4.mesh", Q4(), 16, 9),
-    ("meshes/patch_t6.mesh", T6(), 49, 18),
-    ("meshes/patch_q8.mesh", Q8(), 40, 9),
+    ("meshes/patch_t3.mesh", make_reference_element("T3"), 16, 18),
+    ("meshes/patch_q4.mesh", make_reference_element("Q4"), 16, 9),
+    ("meshes/patch_t6.mesh", make_reference_element("T6"), 49, 18),
+    ("meshes/patch_q8.mesh", make_reference_element("Q8"), 40, 9),
 ]
 
 VALID = """# n_nodes n_elements dim
@@ -33,6 +30,15 @@ MATERIAL 1 plane_strain 21e9 0.25 2400 1.0
 3 1.0 1.0
 4 0.0 1.0
 1 Q4 1 1 1 2 3 4
+"""
+
+TRIANGLE = """# n_nodes n_elements dim
+3 1 2
+MATERIAL 1 plane_stress 1.0 0.25 0.0 1.0
+1 0.0 0.0
+2 1.0 0.0
+3 0.0 1.0
+1 CST 1 1 1 2 3
 """
 
 
@@ -53,12 +59,22 @@ def read_text(text):
     return mesh
 
 
+def raises_value_error(text):
+    try:
+        read_text(text)
+    except ValueError:
+        return True
+
+    return False
+
+
 def test_read_patches():
     for filename, element, n_nodes, n_elements in PATCHES:
         mesh = Mesh2D()
         mesh.read(filename)
 
-        assert mesh.element_type == element.name
+        # La malla usa T3/T6; el elemento de referencia se llama CST/LST
+        assert make_reference_element(mesh.element_type).name == element.name
         assert mesh.number_of_nodes() == n_nodes
         assert mesh.number_of_elements() == n_elements
         assert mesh.number_of_dofs() == 2 * n_nodes
@@ -97,7 +113,7 @@ def test_patch_area():
 
         for e in range(mesh.number_of_elements()):
             coordinates = mesh.element_coordinates(e)[:element.number_of_nodes]
-            vertices = 3 if element.name in ("T3", "T6") else 4
+            vertices = element.number_of_vertices
             x = coordinates[:vertices, 0]
             y = coordinates[:vertices, 1]
 
@@ -109,13 +125,13 @@ def test_patch_area():
 def test_midside_nodes_are_at_midpoints():
     # En T6 y Q8 los nodos de mitad de lado estan en el punto medio del lado
     for filename, element, _, _ in PATCHES:
-        if element.number_of_nodes in (3, 4):
+        if element.order == 1:
             continue
 
         mesh = Mesh2D()
         mesh.read(filename)
 
-        n_vertices = 3 if element.name == "T6" else 4
+        n_vertices = element.number_of_vertices
 
         for e in range(mesh.number_of_elements()):
             c = mesh.element_coordinates(e)
@@ -140,6 +156,71 @@ def test_material_and_dofs():
     assert mesh.element_node_ids(0) == [0, 1, 2, 3]
 
 
+def test_invalid_files_are_rejected():
+    assert not raises_value_error(VALID)
+
+    # Tipo de elemento desconocido
+    assert raises_value_error(VALID.replace("Q4", "Q9"))
+    # Orden que no corresponde al tipo
+    assert raises_value_error(VALID.replace("Q4 1 1", "Q4 2 1"))
+    # Cantidad de nodos incorrecta
+    assert raises_value_error(VALID.replace("1 2 3 4\n", "1 2 3\n"))
+    # Material inexistente
+    assert raises_value_error(VALID.replace("Q4 1 1", "Q4 1 7"))
+    # Modelo de material desconocido
+    assert raises_value_error(VALID.replace("plane_strain", "plane_foo"))
+    # Nodo fuera de rango
+    assert raises_value_error(VALID.replace("1 2 3 4\n", "1 2 3 9\n"))
+    # Orientacion horaria
+    assert raises_value_error(VALID.replace("1 2 3 4\n", "4 3 2 1\n"))
+    # Sin material
+    assert raises_value_error(VALID.replace("MATERIAL 1 plane_strain 21e9 0.25 2400 1.0\n", ""))
+    # Material sin sentido fisico: nu = 0.5, E negativo, espesor nulo
+    assert raises_value_error(VALID.replace("21e9 0.25", "21e9 0.5"))
+    assert raises_value_error(VALID.replace("21e9", "-21e9"))
+    assert raises_value_error(VALID.replace("2400 1.0", "2400 0.0"))
+    # Un elemento de linea no es un elemento de la malla 2D
+    assert raises_value_error(TRIANGLE.replace("CST 1 1 1 2 3", "L2 1 1 1 2"))
+
+
+def test_mixed_types_are_rejected():
+    text = """4 2 2
+MATERIAL 1 plane_stress 1.0 0.25 0.0 1.0
+1 0.0 0.0
+2 1.0 0.0
+3 1.0 1.0
+4 0.0 1.0
+1 Q4 1 1 1 2 3 4
+2 T3 1 1 1 2 3
+"""
+
+    assert raises_value_error(text)
+
+
+def test_canonical_names_and_aliases():
+    # T3 y CST son el mismo elemento: la malla guarda el nombre canonico
+    assert read_text(TRIANGLE).element_type == "CST"
+    assert read_text(TRIANGLE.replace(" CST ", " T3 ")).element_type == "CST"
+    assert read_text(TRIANGLE).reference_element().name == "CST"
+    assert read_text(VALID).element_type == "Q4"
+
+    for filename, element, _, _ in PATCHES:
+        mesh = Mesh2D()
+        mesh.read(filename)
+
+        assert mesh.element_type == element.name
+
+
+def test_reading_twice_does_not_mix_meshes():
+    mesh = Mesh2D()
+    mesh.read("meshes/patch_q4.mesh")
+    mesh.read("meshes/patch_t3.mesh")
+
+    assert mesh.element_type == "CST"
+    assert mesh.number_of_nodes() == 16
+    assert mesh.number_of_elements() == 18
+
+
 if __name__ == "__main__":
     tests = [
         test_read_patches,
@@ -147,6 +228,10 @@ if __name__ == "__main__":
         test_patch_area,
         test_midside_nodes_are_at_midpoints,
         test_material_and_dofs,
+        test_invalid_files_are_rejected,
+        test_mixed_types_are_rejected,
+        test_canonical_names_and_aliases,
+        test_reading_twice_does_not_mix_meshes,
     ]
 
     for test in tests:

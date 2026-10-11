@@ -1,6 +1,33 @@
 import numpy
 
 
+PLANE_MODELS = ["plane_stress", "plane_strain"]
+
+
+def check_material(model, E, nu, rho, thickness):
+    """Verifica que los datos del material tengan sentido fisico; si no, lanza
+    ValueError. La usan PlaneElastic y el lector de mallas.
+
+    En un material isotropo estable -1 < nu < 0.5. Con nu = 0.5 (incompresible)
+    la matriz de deformacion plana divide por (1 - 2 nu) = 0.
+    """
+    if model not in PLANE_MODELS:
+        raise ValueError("Unknown material model: " + str(model))
+
+    # Se escribe "not E > 0" en vez de "E <= 0" para rechazar tambien NaN
+    if not E > 0.0:
+        raise ValueError("Expected E > 0, got " + str(E))
+
+    if not -1.0 < nu < 0.5:
+        raise ValueError("Expected -1 < nu < 0.5, got " + str(nu))
+
+    if not rho >= 0.0:
+        raise ValueError("Expected rho >= 0, got " + str(rho))
+
+    if not thickness > 0.0:
+        raise ValueError("Expected thickness > 0, got " + str(thickness))
+
+
 class PlaneElastic:
     """Material elastico lineal isotropo para problemas 2D.
 
@@ -10,6 +37,8 @@ class PlaneElastic:
     """
 
     def __init__(self, E, nu, model, rho=0.0, thickness=1.0):
+        check_material(model, E, nu, rho, thickness)
+
         self.E = E
         self.nu = nu
         self.model = model

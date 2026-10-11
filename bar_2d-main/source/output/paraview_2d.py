@@ -1,16 +1,46 @@
 import os
 
-import meshio
+import numpy
+
+from source.reference_elements import make_reference_element
 
 
-# Tipo de celda de meshio para cada tipo de elemento. El orden de los nodos
-# (vertices y despues mitades de lado) coincide con el de nuestros elementos.
+# Tipo de celda de meshio para cada elemento (por su nombre canonico). El orden
+# de los nodos (vertices y despues mitades de lado) coincide con el de nuestros
+# elementos. Los alias T3 y T6 se resuelven con make_reference_element.
 CELL_TYPES = {
-    "T3": "triangle",
-    "T6": "triangle6",
+    "CST": "triangle",
+    "LST": "triangle6",
     "Q4": "quad",
     "Q8": "quad8",
 }
+
+
+def cell_type(element_type):
+    """Tipo de celda de meshio para un nombre de elemento (acepta alias)."""
+    return CELL_TYPES[make_reference_element(element_type).name]
+
+
+def check_sizes(mesh, u, point_data, cell_data):
+    """Lanza ValueError si los datos no tienen el tamano de la malla."""
+    n_nodes = mesh.number_of_nodes()
+    n_elements = mesh.number_of_elements()
+
+    if u.shape != (mesh.number_of_dofs(),):
+        raise ValueError(
+            "Expected u with " + str(mesh.number_of_dofs()) + " values, got shape "
+            + str(u.shape)
+        )
+
+    if point_data is not None:
+        for name in point_data:
+            if len(point_data[name]) != n_nodes:
+                raise ValueError("point_data '" + name + "' needs one value per node")
+
+    if cell_data is not None:
+        for name in cell_data:
+            if len(cell_data[name]) != n_elements:
+                raise ValueError("cell_data '" + name + "' needs one value per element")
 
 
 def write_results_2d(filename, mesh, u, scale=1.0, point_data=None, cell_data=None):
@@ -23,6 +53,15 @@ def write_results_2d(filename, mesh, u, scale=1.0, point_data=None, cell_data=No
 
     El desplazamiento real (sin escalar) se guarda como "displacement".
     """
+    # meshio se importa aca y no al principio del modulo: asi cell_type y
+    # check_sizes (y sus tests) funcionan aunque meshio no este instalado
+    import meshio
+
+    # u puede llegar como lista o como arreglo: se convierte a arreglo de NumPy
+    u = numpy.asarray(u, dtype=float)
+
+    check_sizes(mesh, u, point_data, cell_data)
+
     directory = os.path.dirname(filename)
 
     if directory != "":
@@ -36,7 +75,7 @@ def write_results_2d(filename, mesh, u, scale=1.0, point_data=None, cell_data=No
     points = [[p[0], p[1], 0.0] for p in deformed]
     displacement_3d = [[d[0], d[1], 0.0] for d in displacement]
 
-    cells = [(CELL_TYPES[mesh.element_type], mesh.connectivity_array())]
+    cells = [(cell_type(mesh.element_type), mesh.connectivity_array())]
 
     all_point_data = {"displacement": displacement_3d}
 

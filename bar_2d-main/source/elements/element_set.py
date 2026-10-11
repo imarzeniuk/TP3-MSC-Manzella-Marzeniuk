@@ -4,13 +4,16 @@ from source.quadrature.quadrature import Quadrature
 
 
 class ElementSet:
-    """Conjunto de elementos del mismo tipo (todos T3, todos Q4, etc.).
+    """Conjunto de elementos del mismo tipo (todos CST, todos Q4, etc.).
 
     Recibe:
-        reference_element: objeto T3, T6, Q4 o Q8
+        reference_element: objeto Tria o Quad (CST, LST, Q4 o Q8)
         node_coordinates:  matriz de (nodos de la malla) x 2 con [x, y] de cada nodo
         connectivity:      matriz de (elementos) x (nodos por elemento) con los
                            numeros globales de nodo de cada elemento (desde 0)
+        quadrature:        regla de cuadratura (opcional). Si no se indica, se
+                           usa la de integracion completa del elemento. Debe
+                           ser de la misma familia que el elemento.
 
     Todos los indices empiezan en 0:
         element: numero de elemento dentro del conjunto
@@ -22,9 +25,28 @@ class ElementSet:
     sola vez al construir el objeto; shape, dshape y wdetJ solo las consultan.
     """
 
-    def __init__(self, reference_element, node_coordinates, connectivity):
+    # Familias de elementos planos que admite el conjunto (la linea no: sirve
+    # para integrar cargas sobre los lados, no para el dominio)
+    PLANE_FAMILIES = ("triangle", "quadrilateral")
+
+    def __init__(self, reference_element, node_coordinates, connectivity, quadrature=None):
+        if reference_element.family not in self.PLANE_FAMILIES:
+            raise ValueError(
+                "ElementSet needs a plane element (triangle or quadrilateral), got "
+                + reference_element.name
+            )
+
+        if quadrature is None:
+            quadrature = Quadrature.for_element(reference_element)
+
+        if quadrature.family != reference_element.family:
+            raise ValueError(
+                "Expected a " + reference_element.family + " quadrature, got "
+                + quadrature.family
+            )
+
         self.reference_element = reference_element
-        self.quadrature = Quadrature(reference_element)
+        self.quadrature = quadrature
         self.node_coordinates = numpy.array(node_coordinates, dtype=float)
         self.connectivity = numpy.array(connectivity, dtype=int)
 

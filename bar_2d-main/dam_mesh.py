@@ -127,7 +127,9 @@ def write_mesh(filename, kind, **geometry):
     file.write("# node_number x y\n")
 
     for number, (x, y) in enumerate(nodes, 1):
-        file.write(str(number) + " " + format(x, ".4f") + " " + format(y, ".4f") + "\n")
+        # repr escribe todas las cifras del numero: asi los nodos de mitad de lado
+        # no se corren del punto medio por redondeo
+        file.write(str(number) + " " + repr(x) + " " + repr(y) + "\n")
 
     file.write("\n# element_number element_type order material_id connectivity\n")
 

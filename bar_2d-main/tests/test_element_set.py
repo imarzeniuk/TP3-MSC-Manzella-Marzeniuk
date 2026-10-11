@@ -7,10 +7,10 @@ Correr desde la carpeta que contiene a source/ y tests/:
 
 import numpy
 
-from source.reference_elements.t3 import T3
-from source.reference_elements.q4 import Q4
-from source.reference_elements.t6 import T6
-from source.reference_elements.q8 import Q8
+from source.reference_elements.tria import Tria
+from source.reference_elements.quad import Quad
+from source.reference_elements.line import Line
+from source.quadrature.quadrature import Quadrature
 from source.elements.element_set import ElementSet
 
 
@@ -26,7 +26,7 @@ QUADRILATERAL_CORNERS = [
 ]
 
 
-def build_element_set(reference_element, linear_element, corners_list):
+def build_element_set(reference_element, linear_element, corners_list, quadrature=None):
     # Los nodos fisicos se obtienen mapeando los nodos naturales del elemento
     # con las funciones de forma lineales: asi los lados quedan rectos y los
     # nodos de mitad de lado caen en el punto medio.
@@ -42,7 +42,7 @@ def build_element_set(reference_element, linear_element, corners_list):
 
         connectivity.append(element_nodes)
 
-    return ElementSet(reference_element, node_coordinates, connectivity)
+    return ElementSet(reference_element, node_coordinates, connectivity, quadrature)
 
 
 def polygon_area(corners):
@@ -58,10 +58,10 @@ def polygon_area(corners):
 
 # Cada caso: (conjunto de elementos, vertices de cada elemento)
 CASES = [
-    (build_element_set(T3(), T3(), TRIANGLE_CORNERS), TRIANGLE_CORNERS),
-    (build_element_set(T6(), T3(), TRIANGLE_CORNERS), TRIANGLE_CORNERS),
-    (build_element_set(Q4(), Q4(), QUADRILATERAL_CORNERS), QUADRILATERAL_CORNERS),
-    (build_element_set(Q8(), Q4(), QUADRILATERAL_CORNERS), QUADRILATERAL_CORNERS),
+    (build_element_set(Tria("CST"), Tria("CST"), TRIANGLE_CORNERS), TRIANGLE_CORNERS),
+    (build_element_set(Tria("LST"), Tria("CST"), TRIANGLE_CORNERS), TRIANGLE_CORNERS),
+    (build_element_set(Quad("Q4"), Quad("Q4"), QUADRILATERAL_CORNERS), QUADRILATERAL_CORNERS),
+    (build_element_set(Quad("Q8"), Quad("Q4"), QUADRILATERAL_CORNERS), QUADRILATERAL_CORNERS),
 ]
 
 
@@ -122,7 +122,7 @@ def test_clockwise_element_is_rejected():
     node_coordinates = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
 
     try:
-        ElementSet(T3(), node_coordinates, [[0, 2, 1]])
+        ElementSet(Tria("CST"), node_coordinates, [[0, 2, 1]])
     except ValueError:
         return
 
@@ -133,11 +133,70 @@ def test_wrong_number_of_nodes_is_rejected():
     node_coordinates = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
 
     try:
-        ElementSet(Q4(), node_coordinates, [[0, 1, 2]])
+        ElementSet(Quad("Q4"), node_coordinates, [[0, 1, 2]])
     except ValueError:
         return
 
     assert False
+
+
+def test_default_quadrature_is_full_integration():
+    expected = [1, 3, 4, 9]
+
+    for i in range(len(CASES)):
+        assert CASES[i][0].number_of_points == expected[i]
+
+
+def test_explicit_quadrature():
+    # Q8 con Gauss 2x2 (reducida): 4 puntos, y sigue dando el area exacta
+    element_set = build_element_set(
+        Quad("Q8"), Quad("Q4"), QUADRILATERAL_CORNERS, Quadrature("quadrilateral", 2)
+    )
+
+    assert element_set.number_of_points == 4
+
+    for e in range(element_set.number_of_elements):
+        area = 0.0
+
+        for g in range(element_set.number_of_points):
+            area = area + element_set.wdetJ(e, g)
+
+        assert numpy.isclose(area, polygon_area(QUADRILATERAL_CORNERS[e]))
+
+
+def test_quadrature_of_another_family_is_rejected():
+    # (elemento, regla de otra familia)
+    cases = [
+        (Quad("Q4"), Quadrature("triangle", "3pt")),
+        (Quad("Q8"), Quadrature("line", 3)),
+        (Tria("CST"), Quadrature("quadrilateral", 2)),
+        (Tria("LST"), Quadrature("line", 2)),
+    ]
+
+    for reference_element, quadrature in cases:
+        node_coordinates = reference_element.node_coordinates
+        connectivity = [list(range(reference_element.number_of_nodes))]
+
+        try:
+            ElementSet(reference_element, node_coordinates, connectivity, quadrature)
+        except ValueError:
+            continue
+
+        assert False
+
+
+def test_line_element_is_rejected():
+    # La linea sirve para integrar cargas en los lados, no para el dominio
+    for name in ("L2", "L3"):
+        line = Line(name)
+
+        try:
+            ElementSet(line, [[0.0, 0.0], [1.0, 0.0], [0.5, 0.0]], [list(range(line.number_of_nodes))])
+        except ValueError as error:
+            assert "plane element" in str(error)
+            continue
+
+        assert False
 
 
 if __name__ == "__main__":
@@ -148,6 +207,10 @@ if __name__ == "__main__":
         test_gradient_of_linear_field,
         test_clockwise_element_is_rejected,
         test_wrong_number_of_nodes_is_rejected,
+        test_default_quadrature_is_full_integration,
+        test_explicit_quadrature,
+        test_quadrature_of_another_family_is_rejected,
+        test_line_element_is_rejected,
     ]
 
     for test in tests:

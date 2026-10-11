@@ -89,6 +89,29 @@ def test_from_spec():
     assert numpy.allclose(material.D(), PlaneElastic(E, NU, "plane_strain").D())
 
 
+def test_invalid_materials_are_rejected():
+    # (E, nu, modelo, rho, espesor) sin sentido fisico
+    cases = [
+        (E, 0.5, "plane_strain", 0.0, 1.0),    # incompresible: D divide por cero
+        (E, 0.6, "plane_stress", 0.0, 1.0),
+        (E, -1.0, "plane_stress", 0.0, 1.0),
+        (0.0, NU, "plane_stress", 0.0, 1.0),
+        (-E, NU, "plane_stress", 0.0, 1.0),
+        (E, NU, "plane_foo", 0.0, 1.0),
+        (E, NU, "plane_strain", -1.0, 1.0),
+        (E, NU, "plane_strain", 0.0, 0.0),
+        (float("nan"), NU, "plane_strain", 0.0, 1.0),
+    ]
+
+    for E_value, nu_value, model, rho, thickness in cases:
+        try:
+            PlaneElastic(E_value, nu_value, model, rho, thickness)
+        except ValueError:
+            continue
+
+        assert False
+
+
 if __name__ == "__main__":
     tests = [
         test_plane_stress_matrix,
@@ -99,6 +122,7 @@ if __name__ == "__main__":
         test_models_coincide_for_nu_zero,
         test_plane_strain_is_stiffer,
         test_from_spec,
+        test_invalid_materials_are_rejected,
     ]
 
     for test in tests:

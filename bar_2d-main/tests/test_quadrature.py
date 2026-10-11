@@ -9,98 +9,184 @@ import math
 
 import numpy
 
-from source.reference_elements.t3 import T3
-from source.reference_elements.q4 import Q4
-from source.reference_elements.t6 import T6
-from source.reference_elements.q8 import Q8
+from source.reference_elements.tria import Tria
+from source.reference_elements.quad import Quad
+from source.reference_elements.line import Line
 from source.quadrature.quadrature import Quadrature
 
 
-# Elemento de triangulo y grado total maximo que la regla integra exacto
-TRIANGLES = [(T3(), 1), (T6(), 2)]
-
-# Elemento cuadrilatero y grado maximo por variable que la regla integra exacto
-QUADRILATERALS = [(Q4(), 3), (Q8(), 5)]
+# Reglas de triangulo a verificar
+TRIANGLE_RULES = ["1pt", "3pt"] + [("collapsed", n) for n in range(1, 6)]
 
 
 def integrate(quadrature, f):
+    # f recibe el punto como una fila: [xi, eta] (o [xi] en la linea)
     total = 0.0
 
     for g in range(quadrature.number_of_points):
-        xi, eta = quadrature.points[g]
-        total = total + quadrature.weights[g] * f(xi, eta)
+        total = total + quadrature.weights[g] * f(quadrature.points[g])
 
     return total
 
 
-def test_number_of_points():
-    assert Quadrature(T3()).number_of_points == 1
-    assert Quadrature(T6()).number_of_points == 3
-    assert Quadrature(Q4()).number_of_points == 4
-    assert Quadrature(Q8()).number_of_points == 9
+def exact_1d(n):
+    # Integral exacta de x^n en [-1, 1]: 2 / (n + 1) si n es par, 0 si es impar
+    if n % 2 == 0:
+        return 2.0 / (n + 1)
+
+    return 0.0
 
 
-def test_weights_sum_to_reference_area():
-    for element, degree in TRIANGLES:
-        assert numpy.isclose(numpy.sum(Quadrature(element).weights), 0.5)
+def raises_value_error(family, rule):
+    try:
+        Quadrature(family, rule)
+    except ValueError:
+        return True
 
-    for element, degree in QUADRILATERALS:
-        assert numpy.isclose(numpy.sum(Quadrature(element).weights), 4.0)
+    return False
+
+
+def test_number_of_points_and_degree():
+    for n in range(1, 6):
+        assert Quadrature("line", n).number_of_points == n
+        assert Quadrature("line", n).degree == 2 * n - 1
+        assert Quadrature("line", n).points.shape == (n, 1)
+
+        assert Quadrature("quadrilateral", n).number_of_points == n * n
+        assert Quadrature("quadrilateral", n).degree == 2 * n - 1
+        assert Quadrature("quadrilateral", n).points.shape == (n * n, 2)
+
+        assert Quadrature("triangle", ("collapsed", n)).number_of_points == n * n
+        assert Quadrature("triangle", ("collapsed", n)).degree == 2 * n - 2
+
+    assert Quadrature("triangle", "1pt").number_of_points == 1
+    assert Quadrature("triangle", "1pt").degree == 1
+    assert Quadrature("triangle", "3pt").number_of_points == 3
+    assert Quadrature("triangle", "3pt").degree == 2
+
+
+def test_weights_sum_to_reference_size():
+    for n in range(1, 6):
+        assert numpy.isclose(numpy.sum(Quadrature("line", n).weights), 2.0)
+        assert numpy.isclose(numpy.sum(Quadrature("quadrilateral", n).weights), 4.0)
+
+    for rule in TRIANGLE_RULES:
+        assert numpy.isclose(numpy.sum(Quadrature("triangle", rule).weights), 0.5)
+
+
+def test_points_are_inside_the_triangle():
+    for rule in TRIANGLE_RULES:
+        for xi, eta in Quadrature("triangle", rule).points:
+            assert xi > 0.0 and eta > 0.0 and xi + eta < 1.0
+
+
+def test_line_monomials():
+    # Gauss-Legendre de n puntos integra exacto hasta grado 2n - 1
+    for n in range(1, 6):
+        quadrature = Quadrature("line", n)
+
+        for a in range(quadrature.degree + 1):
+            value = integrate(quadrature, lambda p: p[0]**a)
+
+            assert numpy.isclose(value, exact_1d(a))
+
+        # ... y no integra exacto el grado siguiente (2n)
+        value = integrate(quadrature, lambda p: p[0]**(2 * n))
+
+        assert not numpy.isclose(value, exact_1d(2 * n))
+
+
+def test_quadrilateral_monomials():
+    # Gauss n x n integra exacto hasta grado 2n - 1 en cada variable
+    for n in range(1, 6):
+        quadrature = Quadrature("quadrilateral", n)
+
+        for a in range(quadrature.degree + 1):
+            for b in range(quadrature.degree + 1):
+                value = integrate(quadrature, lambda p: p[0]**a * p[1]**b)
+
+                assert numpy.isclose(value, exact_1d(a) * exact_1d(b))
+
+
+def test_quadrilateral_point_order():
+    # xi varia mas rapido que eta
+    points = Quadrature("quadrilateral", 2).points
+    a = 1.0 / math.sqrt(3.0)
+
+    assert numpy.allclose(points, [[-a, -a], [a, -a], [-a, a], [a, a]])
 
 
 def test_triangle_monomials():
     # Integral exacta de xi^a eta^b en el triangulo: a! b! / (a + b + 2)!
-    for element, degree in TRIANGLES:
-        quadrature = Quadrature(element)
+    for rule in TRIANGLE_RULES:
+        quadrature = Quadrature("triangle", rule)
 
-        for a in range(degree + 1):
-            for b in range(degree + 1 - a):
+        for a in range(quadrature.degree + 1):
+            for b in range(quadrature.degree + 1 - a):
                 exact = (
                     math.factorial(a) * math.factorial(b) / math.factorial(a + b + 2)
                 )
-                value = integrate(quadrature, lambda xi, eta: xi**a * eta**b)
+                value = integrate(quadrature, lambda p: p[0]**a * p[1]**b)
 
                 assert numpy.isclose(value, exact)
 
 
-def test_quadrilateral_monomials():
-    # Integral exacta de x^n en [-1, 1]: 2 / (n + 1) si n es par, 0 si es impar
-    def exact_1d(n):
-        if n % 2 == 0:
-            return 2.0 / (n + 1)
+def test_for_element_uses_full_integration():
+    # (elemento, familia, cantidad de puntos de la regla completa)
+    expected = [
+        (Tria("CST"), "triangle", 1),
+        (Tria("LST"), "triangle", 3),
+        (Quad("Q4"), "quadrilateral", 4),
+        (Quad("Q8"), "quadrilateral", 9),
+        (Line("L2"), "line", 2),
+        (Line("L3"), "line", 3),
+    ]
 
-        return 0.0
+    for element, family, number_of_points in expected:
+        quadrature = Quadrature.for_element(element)
 
-    for element, degree in QUADRILATERALS:
-        quadrature = Quadrature(element)
-
-        for a in range(degree + 1):
-            for b in range(degree + 1):
-                exact = exact_1d(a) * exact_1d(b)
-                value = integrate(quadrature, lambda xi, eta: xi**a * eta**b)
-
-                assert numpy.isclose(value, exact)
+        assert quadrature.family == family
+        assert quadrature.number_of_points == number_of_points
 
 
-def test_unknown_element():
-    class Unknown:
-        name = "H8"
+def test_for_element_with_explicit_rule():
+    # La regla no depende del elemento: Q8 con Gauss 2x2 (reducida)
+    assert Quadrature.for_element(Quad("Q8"), 2).number_of_points == 4
+    assert Quadrature.for_element(Tria("CST"), "3pt").number_of_points == 3
 
-    try:
-        Quadrature(Unknown())
-    except ValueError:
-        return
 
-    assert False
+def test_invalid_rules_are_rejected():
+    assert raises_value_error("hexahedron", 2)
+    assert raises_value_error("line", 0)
+    assert raises_value_error("line", 2.0)
+    assert raises_value_error("quadrilateral", "3pt")
+    assert raises_value_error("quadrilateral", -1)
+    assert raises_value_error("triangle", 2)
+    assert raises_value_error("triangle", "7pt")
+    assert raises_value_error("triangle", ("collapsed", 0))
+    assert raises_value_error("line", True)
+
+
+def test_numpy_integers_are_accepted():
+    # Un numero de puntos leido de un arreglo de NumPy es numpy.int64, no int
+    assert Quadrature("quadrilateral", numpy.int64(3)).number_of_points == 9
+    assert Quadrature("line", numpy.int32(2)).number_of_points == 2
+    assert Quadrature("triangle", ("collapsed", numpy.int64(2))).number_of_points == 4
 
 
 if __name__ == "__main__":
     tests = [
-        test_number_of_points,
-        test_weights_sum_to_reference_area,
-        test_triangle_monomials,
+        test_number_of_points_and_degree,
+        test_weights_sum_to_reference_size,
+        test_points_are_inside_the_triangle,
+        test_line_monomials,
         test_quadrilateral_monomials,
-        test_unknown_element,
+        test_quadrilateral_point_order,
+        test_triangle_monomials,
+        test_for_element_uses_full_integration,
+        test_for_element_with_explicit_rule,
+        test_invalid_rules_are_rejected,
+        test_numpy_integers_are_accepted,
     ]
 
     for test in tests:

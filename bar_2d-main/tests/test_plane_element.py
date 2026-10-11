@@ -7,22 +7,20 @@ Correr desde la carpeta que contiene a source/ y tests/:
 
 import numpy
 
-from source.reference_elements.t3 import T3
+from source.reference_elements.tria import Tria
+from source.reference_elements.quad import Quad
+from source.quadrature.quadrature import Quadrature
 from source.elements.element_set import ElementSet
 from source.elements.plane_element import PlaneElement
-from tests.test_element_set import CASES, polygon_area
+from source.materials.plane_elastic import PlaneElastic
+from tests.test_element_set import CASES, QUADRILATERAL_CORNERS, build_element_set, polygon_area
 
 
-E = 21.0e9
-nu = 0.25
-thickness = 0.5
+# Tension plana, espesor 0.5 (la matriz D se verifica en test_plane_elastic)
+MATERIAL = PlaneElastic(21.0e9, 0.25, "plane_stress", thickness=0.5)
 
-# Tension plana
-D = E / (1.0 - nu * nu) * numpy.array([
-    [1.0, nu, 0.0],
-    [nu, 1.0, 0.0],
-    [0.0, 0.0, (1.0 - nu) / 2.0],
-])
+D = MATERIAL.D()
+thickness = MATERIAL.thickness
 
 
 def all_elements():
@@ -32,7 +30,7 @@ def all_elements():
     for element_set, corners_list in CASES:
         for e in range(element_set.number_of_elements):
             elements.append(
-                (PlaneElement(element_set, e, D, thickness), corners_list[e])
+                (PlaneElement(element_set, e, MATERIAL), corners_list[e])
             )
 
     return elements
@@ -88,6 +86,23 @@ def test_only_three_zero_energy_modes():
         assert number_of_zeros == 3
 
 
+def test_q8_reduced_integration_has_a_spurious_mode():
+    # Q8 con Gauss 3x3 (completa): 3 autovalores nulos. Con 2x2 (reducida)
+    # aparece un modo espurio sin energia: 4 autovalores nulos.
+    for n, expected in ((3, 3), (2, 4)):
+        element_set = build_element_set(
+            Quad("Q8"), Quad("Q4"), QUADRILATERAL_CORNERS, Quadrature("quadrilateral", n)
+        )
+
+        for e in range(element_set.number_of_elements):
+            Ke = PlaneElement(element_set, e, MATERIAL).stiffness_matrix()
+            eigenvalues = numpy.linalg.eigvalsh(Ke)
+
+            number_of_zeros = numpy.sum(eigenvalues < 1.0e-9 * numpy.max(eigenvalues))
+
+            assert number_of_zeros == expected
+
+
 def test_constant_strain_energy():
     # Para u = a x + c y, v = b y: eps = [a, b, c] constante y
     # u^T Ke u = eps^T D eps * area * espesor
@@ -120,10 +135,24 @@ def test_global_dofs():
     node_coordinates[0] = [1.0, 0.0]
     node_coordinates[5] = [0.0, 1.0]
 
-    element_set = ElementSet(T3(), node_coordinates, [[2, 0, 5]])
-    element = PlaneElement(element_set, 0, D, thickness)
+    element_set = ElementSet(Tria("CST"), node_coordinates, [[2, 0, 5]])
+    element = PlaneElement(element_set, 0, MATERIAL)
 
     assert element.global_dofs() == [4, 5, 0, 1, 10, 11]
+
+
+def test_material_gives_D_and_thickness():
+    # D y espesor salen del material: con el doble de espesor, Ke es el doble
+    thin = PlaneElastic(21.0e9, 0.25, "plane_strain", thickness=0.5)
+    thick = PlaneElastic(21.0e9, 0.25, "plane_strain", thickness=1.0)
+
+    for element_set, corners_list in CASES:
+        Ke_thin = PlaneElement(element_set, 0, thin)
+        Ke_thick = PlaneElement(element_set, 0, thick)
+
+        assert numpy.allclose(Ke_thin.D, thin.D())
+        assert Ke_thin.thickness == 0.5
+        assert numpy.allclose(Ke_thick.stiffness_matrix(), 2.0 * Ke_thin.stiffness_matrix())
 
 
 if __name__ == "__main__":
@@ -131,9 +160,11 @@ if __name__ == "__main__":
         test_size_and_symmetry,
         test_rigid_body_motions_give_no_forces,
         test_only_three_zero_energy_modes,
+        test_q8_reduced_integration_has_a_spurious_mode,
         test_constant_strain_energy,
         test_B_matrix_gives_constant_strain,
         test_global_dofs,
+        test_material_gives_D_and_thickness,
     ]
 
     for test in tests:
