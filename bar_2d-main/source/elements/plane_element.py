@@ -74,3 +74,17 @@ class PlaneElement:
 
     def stiffness_matrix(self):
         return self.Ke
+
+    def displacements(self, u):
+        """Desplazamientos del elemento, u_e = u[global_dofs()], a partir del
+        vector global u.
+        """
+        return numpy.asarray(u, dtype=float)[self.global_dofs()]
+
+    def strain(self, u, gauss_point):
+        """Deformacion eps = B u_e = [eps_x, eps_y, gamma_xy] en el punto de Gauss."""
+        return self.B_matrix(gauss_point) @ self.displacements(u)
+
+    def stress(self, u, gauss_point):
+        """Tension sigma = D B u_e = [sigma_x, sigma_y, tau_xy] en el punto de Gauss."""
+        return self.D @ self.strain(u, gauss_point)

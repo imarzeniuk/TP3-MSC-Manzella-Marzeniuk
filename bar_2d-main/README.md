@@ -29,7 +29,7 @@ source/
   mesh/                Mesh2D: lector del formato .mesh
   systems/             numeración de DOFs, matriz global, condiciones de borde
   solvers/             resolución del sistema lineal
-  postprocess/         resultantes de reacciones, control de la base y estática a mano
+  postprocess/         reacciones y estática a mano; tensiones (puntos de Gauss, nodos, principales)
   output/              escritura de .vtu para ParaView
 tests/                 un archivo de tests por módulo, más el patch test
 meshes/                mallas de los patch tests y de la presa
@@ -77,7 +77,14 @@ python dam_mesh.py
 ## Presa con la base empotrada
 
 ```
-python dam.py                                  # usa meshes/dam_q8.mesh
+python dam.py
+```
+
+El programa pregunta por consola el tipo de elemento (`T3`/`CST`, `T6`/`LST`, `Q4` o `Q8`) y
+el factor de escala de la deformada; con Enter se usan los valores por defecto (`Q8` y 1000).
+También se pueden pasar por la línea de comandos, y entonces no se preguntan:
+
+```
 python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --freeboard 2
 ```
 
@@ -89,7 +96,25 @@ hidrostática, resuelve y calcula las reacciones `R = K u − f`. Imprime:
   rozamiento mínimo);
 - el equilibrio global entre reacciones y cargas;
 - una tabla con las reacciones de cada nodo de la base, marcando los nodos traccionados o
-  con `|R_x| > μ R_y`, donde el empotramiento deja de equivaler a un apoyo con rozamiento.
+  con `|R_x| > μ R_y`, donde el empotramiento deja de equivaler a un apoyo con rozamiento;
+- la máxima y la mínima tensión principal en los puntos de Gauss, con su ubicación y elemento.
 
 Al final escribe `results/<malla>.vtu` con la configuración deformada (`--scale` es el factor
-de escala), para abrir en ParaView.
+de escala), para abrir en ParaView. Campos del archivo, en Pa y con tracción positiva:
+
+| Campo | Dónde | Contenido |
+|---|---|---|
+| `displacement` | nodos | desplazamiento real (sin escalar) |
+| `sigma_x`, `sigma_y`, `tau_xy`, `sigma_z` | nodos y elementos | componentes de tensión |
+| `sigma_1`, `sigma_2` | nodos | tensiones principales en el plano |
+| `sigma_max`, `sigma_min` | nodos (`sigma_max` también en elementos) | máxima y mínima tensión principal, incluida `sigma_z` |
+
+Las tensiones se calculan en los puntos de Gauss (`σ = D B u`). Los valores de los nodos se
+obtienen extrapolando las componentes desde los puntos de Gauss y promediando entre los
+elementos que comparten el nodo; los de los elementos son el promedio ponderado por área.
+Para la distribución de la máxima tensión principal sobre la deformada, colorear por
+`sigma_max`.
+
+El máximo de tracción cae en el talón (0, 0), donde la base empotrada se encuentra con el
+paramento cargado: es una singularidad del modelo que crece al refinar la malla, no un valor
+de diseño.

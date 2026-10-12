@@ -71,3 +71,21 @@ class PlaneElastic:
             [nu, 1.0 - nu, 0.0],
             [0.0, 0.0, 0.5 * (1.0 - 2.0 * nu)],
         ])
+
+    def out_of_plane_stress(self, sigma):
+        """Tension fuera del plano, sigma_z, a partir de las tensiones en el plano.
+
+        sigma puede tener cualquier forma mientras su ultimo eje sea
+        [sigma_x, sigma_y, tau_xy]. Devuelve un arreglo con la forma de sigma
+        sin el ultimo eje:
+
+            deformacion plana (eps_z = 0): sigma_z = nu (sigma_x + sigma_y)
+            tension plana:                 sigma_z = 0
+        """
+        sigma = numpy.asarray(sigma, dtype=float)
+
+        # sigma[..., 0]: componente 0 del ultimo eje, cualquiera sea la forma del resto
+        if self.model == "plane_strain":
+            return self.nu * (sigma[..., 0] + sigma[..., 1])
+
+        return numpy.zeros(sigma.shape[:-1])

@@ -2,12 +2,16 @@
 
 Lee una malla, arma K y f (peso propio + presion hidrostatica), fija u = v = 0
 en todos los nodos de la base (y = 0), resuelve, calcula las reacciones y las
-compara con la estatica a mano. Al final escribe un .vtu con la configuracion
-deformada.
+compara con la estatica a mano. Despues calcula las tensiones y escribe un
+.vtu con la configuracion deformada y los campos de tension.
 
 Uso, desde la carpeta que contiene a source/ y meshes/:
 
-    python dam.py                                   (usa meshes/dam_q8.mesh)
+    python dam.py
+
+El programa pregunta por consola el tipo de elemento y el factor de escala.
+Tambien se pueden pasar por la linea de comandos, y entonces no los pregunta:
+
     python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7
 """
 
@@ -25,6 +29,10 @@ from source.systems.boundary_conditions import (
     nodes_on_line, fixed_dofs, solve_with_dirichlet,
 )
 from source.postprocess.reactions import resultant, base_contact_table, dam_statics
+from source.postprocess.stresses import (
+    STRESS_NAMES, gauss_point_stresses, gauss_point_coordinates,
+    principal_stresses, element_average, nodal_stresses,
+)
 from source.output.paraview_2d import write_results_2d
 
 
@@ -32,9 +40,69 @@ G = 9.81                # m/s2
 WATER_DENSITY = 1000.0  # kg/m3
 
 
+# Malla de la presa para cada nombre de elemento que se puede escribir en consola
+DAM_MESHES = {
+    "T3": "meshes/dam_t3.mesh",
+    "CST": "meshes/dam_t3.mesh",
+    "T6": "meshes/dam_t6.mesh",
+    "LST": "meshes/dam_t6.mesh",
+    "Q4": "meshes/dam_q4.mesh",
+    "Q8": "meshes/dam_q8.mesh",
+}
+
+DEFAULT_ELEMENT = "Q8"
+DEFAULT_SCALE = 1000.0
+
+
+def ask_mesh():
+    """Pregunta por consola el tipo de elemento, hasta recibir uno valido, y
+    devuelve el archivo de malla que le corresponde. Enter usa el valor por defecto.
+    """
+    while True:
+        # input muestra el texto y devuelve lo que se escribe, como texto
+        answer = input(
+            "Elemento (T3/CST, T6/LST, Q4, Q8) [" + DEFAULT_ELEMENT + "]: "
+        )
+
+        # strip saca los espacios y upper pasa a mayusculas: " q8 " -> "Q8"
+        name = answer.strip().upper()
+
+        if name == "":
+            name = DEFAULT_ELEMENT
+
+        if name in DAM_MESHES:
+            return DAM_MESHES[name]
+
+        print("  Opcion no valida. Escribir T3, CST, T6, LST, Q4 o Q8.")
+
+
+def ask_scale():
+    """Pregunta por consola el factor de escala de la deformada, hasta recibir
+    un numero positivo. Enter usa el valor por defecto.
+    """
+    while True:
+        answer = input("Factor de escala [" + str(DEFAULT_SCALE) + "]: ").strip()
+
+        if answer == "":
+            return DEFAULT_SCALE
+
+        try:
+            # Se acepta la coma decimal: "2,5" -> 2.5
+            scale = float(answer.replace(",", "."))
+        except ValueError:
+            print("  Valor no valido. Escribir un numero, por ejemplo 1000.")
+            continue
+
+        if scale > 0.0:
+            return scale
+
+        print("  El factor de escala debe ser mayor que 0.")
+
+
 def solve_dam(mesh, water_level):
-    """Resuelve la presa con la base empotrada. Devuelve (u, R, f, base_nodes):
-    desplazamientos, reacciones, cargas y nodos de la base.
+    """Resuelve la presa con la base empotrada. Devuelve
+    (u, R, f, base_nodes, elements): desplazamientos, reacciones, cargas,
+    nodos de la base y la lista de PlaneElement (para calcular tensiones).
     """
     coordinates = mesh.node_coordinates()
 
@@ -49,8 +117,11 @@ def solve_dam(mesh, water_level):
 
     K = DenseMatrix(mesh.number_of_dofs())
 
+    elements = []
+
     for e in range(mesh.number_of_elements()):
-        K.scatter_local_to_global(PlaneElement(element_set, e, materials[e]))
+        elements.append(PlaneElement(element_set, e, materials[e]))
+        K.scatter_local_to_global(elements[e])
 
     f = (
         body_force_vector(element_set, materials, G)
@@ -64,7 +135,7 @@ def solve_dam(mesh, water_level):
 
     u, R = solve_with_dirichlet(K.values, f, prescribed_dofs, prescribed_values)
 
-    return u, R, f, base_nodes
+    return u, R, f, base_nodes, elements
 
 
 def dam_dimensions(coordinates):
@@ -88,17 +159,26 @@ def print_row(name, fem, hand, unit):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Presa de gravedad con la base empotrada")
-    parser.add_argument("mesh", nargs="?", default="meshes/dam_q8.mesh",
-                        help="archivo de malla (por defecto meshes/dam_q8.mesh)")
+    parser.add_argument("mesh", nargs="?", default=None,
+                        help="archivo de malla (si no se indica, se pregunta el elemento)")
     parser.add_argument("--freeboard", type=float, default=2.0,
                         help="borde libre en m: el agua llega hasta H - borde libre")
     parser.add_argument("--mu", type=float, default=0.6,
                         help="coeficiente de rozamiento para el control de la base")
-    parser.add_argument("--scale", type=float, default=1000.0,
-                        help="factor de escala de la deformada en el .vtu")
+    parser.add_argument("--scale", type=float, default=None,
+                        help="factor de escala de la deformada (si no se indica, se pregunta)")
     parser.add_argument("--output", default=None,
                         help="archivo .vtu de salida (por defecto results/<malla>.vtu)")
     arguments = parser.parse_args()
+
+    # Lo que no vino por la linea de comandos se pregunta por consola
+    if arguments.mesh is None:
+        arguments.mesh = ask_mesh()
+
+    if arguments.scale is None:
+        arguments.scale = ask_scale()
+
+    print()
 
     mesh = Mesh2D()
     mesh.read(arguments.mesh)
@@ -109,7 +189,7 @@ if __name__ == "__main__":
     B, c, H = dam_dimensions(coordinates)
     water_level = H - arguments.freeboard
 
-    u, R, f, base_nodes = solve_dam(mesh, water_level)
+    u, R, f, base_nodes, elements = solve_dam(mesh, water_level)
 
     all_nodes = range(mesh.number_of_nodes())
     toe = (B, 0.0)
@@ -191,6 +271,56 @@ if __name__ == "__main__":
 
     print()
 
+    # Tensiones en los puntos de Gauss: (elementos, puntos de Gauss, 4)
+    element_set = elements[0].element_set
+
+    sigma_gp = gauss_point_stresses(elements, u)
+    principal_gp = principal_stresses(sigma_gp)
+    gp_coordinates = gauss_point_coordinates(element_set)
+
+    # numpy.argmax devuelve la posicion en el arreglo "aplanado";
+    # unravel_index la convierte en (elemento, punto de Gauss)
+    e_max, g_max = numpy.unravel_index(
+        numpy.argmax(principal_gp["sigma_max"]), principal_gp["sigma_max"].shape)
+    e_min, g_min = numpy.unravel_index(
+        numpy.argmin(principal_gp["sigma_min"]), principal_gp["sigma_min"].shape)
+
+    print("Tensiones principales en los puntos de Gauss (traccion positiva)")
+    print("  sigma_max maxima: {:>9.4f} MPa en ({:.3f}, {:.3f}) m, elemento {}".format(
+        principal_gp["sigma_max"][e_max, g_max] / 1.0e6,
+        gp_coordinates[e_max, g_max, 0], gp_coordinates[e_max, g_max, 1], e_max + 1))
+    print("  sigma_min minima: {:>9.4f} MPa en ({:.3f}, {:.3f}) m, elemento {}".format(
+        principal_gp["sigma_min"][e_min, g_min] / 1.0e6,
+        gp_coordinates[e_min, g_min, 0], gp_coordinates[e_min, g_min, 1], e_min + 1))
+    print()
+    print("  Advertencia: el maximo de traccion cae en el talon (0, 0), donde la base")
+    print("  empotrada se encuentra con el paramento cargado. Es una singularidad del")
+    print("  modelo y crece al refinar la malla: no es un valor de diseno.")
+    print()
+
+    # Valores en los nodos: se extrapolan las componentes y despues se calculan
+    # las principales
+    sigma_nodes = nodal_stresses(element_set, sigma_gp)
+    principal_nodes = principal_stresses(sigma_nodes)
+
+    point_data = {}
+
+    for i in range(len(STRESS_NAMES)):
+        point_data[STRESS_NAMES[i]] = sigma_nodes[:, i]
+
+    for name in ("sigma_1", "sigma_2", "sigma_max", "sigma_min"):
+        point_data[name] = principal_nodes[name]
+
+    # Valores por elemento: promedio de las componentes y sigma_max del promedio
+    sigma_elements = element_average(element_set, sigma_gp)
+
+    cell_data = {}
+
+    for i in range(len(STRESS_NAMES)):
+        cell_data[STRESS_NAMES[i]] = sigma_elements[:, i]
+
+    cell_data["sigma_max"] = principal_stresses(sigma_elements)["sigma_max"]
+
     output = arguments.output
 
     if output is None:
@@ -198,6 +328,9 @@ if __name__ == "__main__":
         name = arguments.mesh.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
         output = "results/" + name + ".vtu"
 
-    write_results_2d(output, mesh, u, scale=arguments.scale)
+    write_results_2d(output, mesh, u, scale=arguments.scale,
+                     point_data=point_data, cell_data=cell_data)
 
     print("Escrito", output, "(factor de escala " + str(arguments.scale) + ")")
+    print("  campos en los nodos:    ", ", ".join(point_data))
+    print("  campos en los elementos:", ", ".join(cell_data))
