@@ -51,7 +51,9 @@ def write_results_2d(filename, mesh, u, scale=1.0, point_data=None, cell_data=No
     point_data : diccionario nombre -> arreglo con un valor por nodo (opcional)
     cell_data  : diccionario nombre -> arreglo con un valor por elemento (opcional)
 
-    El desplazamiento real (sin escalar) se guarda como "displacement".
+    El desplazamiento real (sin escalar) se guarda como el vector
+    "displacement" y, para colorear por separado, como los escalares "u_x",
+    "u_y" y "u_magnitude" (modulo).
     """
     # meshio se importa aca y no al principio del modulo: asi cell_type y
     # check_sizes (y sus tests) funcionan aunque meshio no este instalado
@@ -77,7 +79,14 @@ def write_results_2d(filename, mesh, u, scale=1.0, point_data=None, cell_data=No
 
     cells = [(cell_type(mesh.element_type), mesh.connectivity_array())]
 
-    all_point_data = {"displacement": displacement_3d}
+    all_point_data = {
+        "displacement": displacement_3d,
+        # displacement[:, 0]: columna 0 (u de cada nodo); [:, 1]: columna 1 (v)
+        "u_x": displacement[:, 0],
+        "u_y": displacement[:, 1],
+        # numpy.linalg.norm(..., axis=1): modulo de cada fila [u, v]
+        "u_magnitude": numpy.linalg.norm(displacement, axis=1),
+    }
 
     if point_data is not None:
         all_point_data.update(point_data)

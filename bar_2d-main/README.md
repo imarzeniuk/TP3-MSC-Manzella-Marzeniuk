@@ -175,6 +175,7 @@ de escala), para abrir en ParaView. Campos del archivo, en Pa y con tracción po
 | Campo | Dónde | Contenido |
 |---|---|---|
 | `displacement` | nodos | desplazamiento real (sin escalar) |
+| `u_x`, `u_y`, `u_magnitude` | nodos | componentes x e y del desplazamiento real y su módulo |
 | `sigma_x`, `sigma_y`, `tau_xy`, `sigma_z` | nodos y elementos | componentes de tensión |
 | `sigma_1`, `sigma_2` | nodos | tensiones principales en el plano |
 | `sigma_max`, `sigma_min` | nodos (`sigma_max` también en elementos) | máxima y mínima tensión principal, incluida `sigma_z` |
