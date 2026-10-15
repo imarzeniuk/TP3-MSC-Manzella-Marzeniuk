@@ -58,8 +58,8 @@ G = 9.81                # m/s2
 WATER_DENSITY = 1000.0  # kg/m3
 
 # Base elastica (Robin): rigidez por unidad de area de los resortes de la base
-ROBIN_KN = 1.0e9        # N/m3, vertical
-ROBIN_KT = 0.4 * ROBIN_KN   # N/m3, horizontal
+ROBIN_KN = 1.0e13        # N/m3, vertical
+ROBIN_KT = 1 * ROBIN_KN   # N/m3, horizontal
 
 
 # Malla de la presa para cada nombre de elemento que se puede escribir en consola
