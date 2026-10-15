@@ -45,6 +45,7 @@ from source.systems.loads import (
 from source.systems.boundary_conditions import (
     nodes_on_line, fixed_dofs, solve_with_dirichlet,
 )
+from source.systems.robin import robin_base_matrix
 from source.postprocess.reactions import resultant, base_contact_table, dam_statics
 from source.postprocess.stresses import (
     STRESS_NAMES, gauss_point_stresses, gauss_point_coordinates,
@@ -55,6 +56,10 @@ from source.output.paraview_2d import write_results_2d
 
 G = 9.81                # m/s2
 WATER_DENSITY = 1000.0  # kg/m3
+
+# Base elastica (Robin): rigidez por unidad de area de los resortes de la base
+ROBIN_KN = 1.0e9        # N/m3, vertical
+ROBIN_KT = 0.4 * ROBIN_KN   # N/m3, horizontal
 
 
 # Malla de la presa para cada nombre de elemento que se puede escribir en consola
@@ -190,7 +195,7 @@ def ask_released_nodes(number_of_base_nodes):
 
 
 def solve_dam(mesh, water_level, released_nodes=0, release_mode="both",
-              uniform_test=False):
+              uniform_test=False, robin=None):
     """Resuelve la presa apoyada en la base.
 
     released_nodes: cantidad de nodos de la base liberados, contados desde el
@@ -200,6 +205,9 @@ def solve_dam(mesh, water_level, released_nodes=0, release_mode="both",
     uniform_test:   True para la prueba de la deformada: sin peso propio y con
                     una presion uniforme P = rho_w g h / 2 hasta el nivel del
                     agua (misma resultante que la hidrostatica).
+    robin:          (k_normal, k_tangent) en N/m3 para apoyar la base en resortes
+                    en vez de empotrarla. Con robin no se prescribe ningun DOF,
+                    no se liberan nodos y R = -K_robin u (fuerza de los resortes).
 
     Devuelve (u, R, f, base_nodes, released, elements): desplazamientos,
     reacciones, cargas, nodos de la base ordenados por x, nodos liberados y la
@@ -244,6 +252,13 @@ def solve_dam(mesh, water_level, released_nodes=0, release_mode="both",
             + hydrostatic_vector(element_set, materials, WATER_DENSITY, G, water_level)
         )
 
+    if robin is not None:
+        K_robin = robin_base_matrix(element_set, materials, robin[0], robin[1])
+
+        u, _ = solve_with_dirichlet(K.values + K_robin, f, [], [])
+
+        return u, -K_robin @ u, f, base_nodes, [], elements
+
     # Los primeros released_nodes de la base (desde el talon) se liberan; el
     # resto queda con u = v = 0
     released = base_nodes[:released_nodes]
@@ -281,8 +296,45 @@ def print_row(name, fem, hand, unit):
     print("  {:<28}{:>14.4f}{:>14.4f}  {}".format(name, fem, hand, unit))
 
 
+def stress_fields(elements, u):
+    """Tensiones de la solucion u. Devuelve (sigma_gp, principal_gp, point_data,
+    cell_data): en los puntos de Gauss, y los campos en los nodos y en los
+    elementos listos para escribir en el .vtu.
+    """
+    element_set = elements[0].element_set
+
+    sigma_gp = gauss_point_stresses(elements, u)
+    principal_gp = principal_stresses(sigma_gp)
+
+    # Valores en los nodos: se extrapolan las componentes y despues se calculan
+    # las principales
+    sigma_nodes = nodal_stresses(element_set, sigma_gp)
+    principal_nodes = principal_stresses(sigma_nodes)
+
+    point_data = {}
+
+    for i in range(len(STRESS_NAMES)):
+        point_data[STRESS_NAMES[i]] = sigma_nodes[:, i]
+
+    for name in ("sigma_1", "sigma_2", "sigma_max", "sigma_min"):
+        point_data[name] = principal_nodes[name]
+
+    # Valores por elemento: promedio de las componentes y sigma_max del promedio
+    sigma_elements = element_average(element_set, sigma_gp)
+
+    cell_data = {}
+
+    for i in range(len(STRESS_NAMES)):
+        cell_data[STRESS_NAMES[i]] = sigma_elements[:, i]
+
+    cell_data["sigma_max"] = principal_stresses(sigma_elements)["sigma_max"]
+
+    return sigma_gp, principal_gp, point_data, cell_data
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Presa de gravedad con la base empotrada")
+    parser = argparse.ArgumentParser(
+        description="Presa de gravedad: base empotrada y base elastica (Robin)")
     parser.add_argument("mesh", nargs="?", default=None,
                         help="archivo de malla (si no se indica, se pregunta el elemento)")
     parser.add_argument("--base", type=float, default=None,
@@ -299,6 +351,10 @@ if __name__ == "__main__":
     parser.add_argument("--release", type=int, default=None,
                         help="nodos de la base a liberar, contados desde el talon "
                              "(si no se indica, se pregunta)")
+    parser.add_argument("--kn", type=float, default=ROBIN_KN,
+                        help="rigidez vertical de la base elastica en N/m3 (Robin)")
+    parser.add_argument("--kt", type=float, default=ROBIN_KT,
+                        help="rigidez horizontal de la base elastica en N/m3 (Robin)")
     parser.add_argument("--uniform-test", action="store_true",
                         help="prueba de la deformada: sin peso propio y con presion "
                              "uniforme sobre el paramento (base empotrada)")
@@ -510,8 +566,7 @@ if __name__ == "__main__":
     # Tensiones en los puntos de Gauss: (elementos, puntos de Gauss, 4)
     element_set = elements[0].element_set
 
-    sigma_gp = gauss_point_stresses(elements, u)
-    principal_gp = principal_stresses(sigma_gp)
+    sigma_gp, principal_gp, point_data, cell_data = stress_fields(elements, u)
     gp_coordinates = gauss_point_coordinates(element_set)
 
     # numpy.argmax devuelve la posicion en el arreglo "aplanado";
@@ -541,29 +596,6 @@ if __name__ == "__main__":
 
     print()
 
-    # Valores en los nodos: se extrapolan las componentes y despues se calculan
-    # las principales
-    sigma_nodes = nodal_stresses(element_set, sigma_gp)
-    principal_nodes = principal_stresses(sigma_nodes)
-
-    point_data = {}
-
-    for i in range(len(STRESS_NAMES)):
-        point_data[STRESS_NAMES[i]] = sigma_nodes[:, i]
-
-    for name in ("sigma_1", "sigma_2", "sigma_max", "sigma_min"):
-        point_data[name] = principal_nodes[name]
-
-    # Valores por elemento: promedio de las componentes y sigma_max del promedio
-    sigma_elements = element_average(element_set, sigma_gp)
-
-    cell_data = {}
-
-    for i in range(len(STRESS_NAMES)):
-        cell_data[STRESS_NAMES[i]] = sigma_elements[:, i]
-
-    cell_data["sigma_max"] = principal_stresses(sigma_elements)["sigma_max"]
-
     output = arguments.output
 
     if output is None:
@@ -584,3 +616,89 @@ if __name__ == "__main__":
     print("Escrito", output, "(factor de escala " + str(arguments.scale) + ")")
     print("  campos en los nodos:    ", ", ".join(point_data))
     print("  campos en los elementos:", ", ".join(cell_data))
+
+    if arguments.uniform_test:
+        sys.exit(0)
+
+    # Misma presa con la base apoyada en resortes (condicion de Robin)
+    print()
+    print("BASE ELASTICA (Robin): k_n = {:.3g} N/m3, k_t = {:.3g} N/m3".format(
+        arguments.kn, arguments.kt))
+    print()
+
+    u_r, R_r, f_r, _, _, elements_r = solve_dam(
+        mesh, water_level, robin=(arguments.kn, arguments.kt)
+    )
+
+    Rx_r, Ry_r, M_Rr = resultant(coordinates, R_r, base_nodes, toe)
+    _, principal_gp_r, point_data_r, cell_data_r = stress_fields(elements_r, u_r)
+
+    heel = base_nodes[0]
+    foot = base_nodes[-1]
+
+    print("Empotrada vs. base elastica (por metro de presa)")
+    print("  {:<30}{:>14}{:>14}".format("", "empotrada", "Robin"))
+    print("  {:<30}{:>14.4f}{:>14.4f}  MN".format("Suma R_x", Rx / 1.0e6, Rx_r / 1.0e6))
+    print("  {:<30}{:>14.4f}{:>14.4f}  MN".format("Suma R_y", Ry / 1.0e6, Ry_r / 1.0e6))
+    print("  {:<30}{:>14.4f}{:>14.4f}  MN m".format(
+        "M_R respecto del pie", M_R / 1.0e6, M_Rr / 1.0e6))
+    print("  {:<30}{:>14.4f}{:>14.4f}  mm".format(
+        "u de la cresta", 1000.0 * u[2 * crest], 1000.0 * u_r[2 * crest]))
+    print("  {:<30}{:>14.4f}{:>14.4f}  mm".format(
+        "v del talon", 1000.0 * u[2 * heel + 1], 1000.0 * u_r[2 * heel + 1]))
+    print("  {:<30}{:>14.4f}{:>14.4f}  mm".format(
+        "v del pie", 1000.0 * u[2 * foot + 1], 1000.0 * u_r[2 * foot + 1]))
+    print("  {:<30}{:>14.4f}{:>14.4f}  MPa".format(
+        "sigma_max maxima",
+        principal_gp["sigma_max"].max() / 1.0e6, principal_gp_r["sigma_max"].max() / 1.0e6))
+    print("  {:<30}{:>14.4f}{:>14.4f}  MPa".format(
+        "sigma_min minima",
+        principal_gp["sigma_min"].min() / 1.0e6, principal_gp_r["sigma_min"].min() / 1.0e6))
+    print()
+
+    print("Equilibrio global Robin (deben dar 0): reacciones + cargas")
+    print("  fuerza en x: {:.3e} N".format(Rx_r + fx))
+    print("  fuerza en y: {:.3e} N".format(Ry_r + fy))
+    print("  momento:     {:.3e} N m".format(M_Rr + M_f))
+    print()
+
+    print("Reaccion vertical de los resortes en la base (kN, traccion negativa)")
+    print("  {:>8}{:>12}{:>12}{:>10}".format("x (m)", "R_x (kN)", "R_y (kN)", "v (mm)"))
+
+    number_of_tension_r = 0
+
+    for node_id in base_nodes:
+        dof_x, dof_y = 2 * node_id, 2 * node_id + 1
+        flag = ""
+
+        if R_r[dof_y] < 0.0:
+            flag = "TRACCION"
+            number_of_tension_r = number_of_tension_r + 1
+
+        print("  {:>8.3f}{:>12.1f}{:>12.1f}{:>10.4f}  {}".format(
+            coordinates[node_id][0], R_r[dof_x] / 1.0e3, R_r[dof_y] / 1.0e3,
+            1000.0 * u_r[dof_y], flag))
+
+    print()
+
+    if number_of_tension_r > 0:
+        print(number_of_tension_r, "nodos con resorte traccionado: un suelo real no tracciona.")
+        print("(El modelo lineal de Robin permite esa traccion.)")
+    else:
+        print("Ningun resorte traccionado.")
+
+    print()
+
+    output_robin = arguments.output
+
+    if output_robin is None:
+        file_name = arguments.mesh.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
+        output_robin = "results/" + file_name + "_robin.vtu"
+    else:
+        root, extension = os.path.splitext(output_robin)
+        output_robin = root + "_robin" + extension
+
+    write_results_2d(output_robin, mesh, u_r, scale=arguments.scale,
+                     point_data=point_data_r, cell_data=cell_data_r)
+
+    print("Escrito", output_robin, "(factor de escala " + str(arguments.scale) + ")")
