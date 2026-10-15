@@ -74,20 +74,53 @@ o todos juntos con `pytest` si está instalado. Regenerar las mallas de la presa
 python dam_mesh.py
 ```
 
+Genera las cuatro mallas de siempre con B = 18 m (`dam_t3`, `dam_t6`, `dam_q4`, `dam_q8`) y,
+para el estudio del ancho de la base, mallas Q8 con B = 24, 30 y 36 m (`dam_q8_b24.mesh`,
+etc.). NX crece 2 elementos cada 6 m de base, para que los elementos de la base sigan midiendo
+3 m; NY queda en 24.
+
 ## Presa con la base empotrada
 
 ```
 python dam.py
 ```
 
-El programa pregunta por consola el tipo de elemento (`T3`/`CST`, `T6`/`LST`, `Q4` o `Q8`),
-el factor de escala de la deformada y cuántos nodos de la base liberar; con Enter se usan los
-valores por defecto (`Q8`, 1000 y 0). También se pueden pasar por la línea de comandos, y
-entonces no se preguntan:
+El programa pregunta por consola, en este orden:
+
+1. el ancho de la base: 18, 24, 30 o 36 m;
+2. el tipo de elemento (`T3`/`CST`, `T6`/`LST`, `Q4` o `Q8`), solo con B = 18 m: para los demás
+   anchos hay solo malla Q8 y no se pregunta;
+3. el factor de escala de la deformada;
+4. cuántos nodos de la base liberar.
+
+Con Enter se usan los valores por defecto (18 m, `Q8`, 1000 y 0). También se pueden pasar por
+la línea de comandos, y entonces no se preguntan:
 
 ```
 python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --freeboard 2 --release 1
+python dam.py --base 24 --scale 1000 --release 1
 ```
+
+Si se pasa el archivo de malla, no se pregunta ni la base ni el elemento: B se mide sobre la
+malla (y se ignora `--base`).
+
+### Estudio del ancho de la base
+
+Para aumentar el factor de seguridad se ensancha la base manteniendo el resto de la geometría
+(paramento aguas arriba vertical, cresta de 3 m, altura de 30 m) y el nivel del agua (28 m):
+
+```
+python dam.py --base 18
+python dam.py --base 24
+python dam.py --base 30
+python dam.py --base 36
+```
+
+Cada corrida compara las reacciones con la estática a mano de ese ancho (peso, momentos
+respecto del pie, factor de seguridad al vuelco y rozamiento mínimo) y escribe
+`results/dam_q8_b24.vtu`, etc. (con B = 18, `results/dam_q8.vtu`). Conviene liberar nodos del
+talón hasta que no quede ningún apoyado traccionado: con las mallas actuales son 2 nodos con
+B = 18, 1 con B = 24 y 30, y ninguno con B = 36.
 
 ### Liberación manual de la base
 

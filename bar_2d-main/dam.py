@@ -18,15 +18,19 @@ Uso, desde la carpeta que contiene a source/ y meshes/:
 
     python dam.py
 
-El programa pregunta por consola el tipo de elemento, el factor de escala y
-cuantos nodos de la base liberar. Tambien se pueden pasar por la linea de
-comandos, y entonces no los pregunta:
+El programa pregunta por consola el ancho de la base, el tipo de elemento
+(solo con la base de 18 m; para las demas hay solo malla Q8), el factor de
+escala y cuantos nodos de la base liberar. Tambien se pueden pasar por la
+linea de comandos, y entonces no los pregunta:
 
     python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --release 1
+    python dam.py --base 24 --scale 1000 --release 1
     python dam.py meshes/dam_q8.mesh --uniform-test --scale 2000
 """
 
 import argparse
+import os
+import sys
 
 import numpy
 
@@ -63,10 +67,46 @@ DAM_MESHES = {
     "Q8": "meshes/dam_q8.mesh",
 }
 
+# Anchos de base (m) con malla generada por dam_mesh.py. Con 18 m hay mallas de
+# los cuatro elementos; con los demas, solo Q8 (meshes/dam_q8_b24.mesh, etc.)
+DAM_BASES = [18, 24, 30, 36]
+DEFAULT_BASE = 18
+
 DEFAULT_ELEMENT = "Q8"
 DEFAULT_SCALE = 1000.0
 DEFAULT_RELEASED_NODES = 0     # nodos de la base liberados, contados desde el talon
 RELEASE_MODE = "both"          # "both": libera u y v (traccion nula); "vertical": solo v
+
+
+def ask_base():
+    """Pregunta el ancho de la base: 18 (por defecto), 24, 30 o 36 m. Repite
+    la pregunta hasta recibir uno valido; Enter usa el valor por defecto.
+    """
+    options = ", ".join(str(base) for base in DAM_BASES)
+
+    while True:
+        answer = input(
+            "Ancho de la base en m (" + options + ") [" + str(DEFAULT_BASE) + "]: "
+        ).strip()
+
+        if answer == "":
+            return DEFAULT_BASE
+
+        try:
+            # Se acepta "24", "24.0" o "24,0"
+            base = float(answer.replace(",", "."))
+        except ValueError:
+            base = None
+
+        if base is not None and base in DAM_BASES:
+            return int(base)
+
+        print("  Opcion no valida. Escribir " + options + ".")
+
+
+def base_mesh(base):
+    """Malla Q8 de la presa para un ancho de base distinto de 18 m."""
+    return "meshes/dam_q8_b" + str(base) + ".mesh"
 
 
 def ask_mesh():
@@ -245,6 +285,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Presa de gravedad con la base empotrada")
     parser.add_argument("mesh", nargs="?", default=None,
                         help="archivo de malla (si no se indica, se pregunta el elemento)")
+    parser.add_argument("--base", type=float, default=None,
+                        help="ancho de la base en m: " + ", ".join(str(b) for b in DAM_BASES)
+                             + " (si no se indica, se pregunta)")
     parser.add_argument("--freeboard", type=float, default=2.0,
                         help="borde libre en m: el agua llega hasta H - borde libre")
     parser.add_argument("--mu", type=float, default=0.6,
@@ -261,9 +304,30 @@ if __name__ == "__main__":
                              "uniforme sobre el paramento (base empotrada)")
     arguments = parser.parse_args()
 
-    # Lo que no vino por la linea de comandos se pregunta por consola
-    if arguments.mesh is None:
-        arguments.mesh = ask_mesh()
+    # Lo que no vino por la linea de comandos se pregunta por consola. Si se
+    # pasa el archivo de malla, la base se mide sobre la malla y no se pregunta.
+    if arguments.mesh is not None:
+        if arguments.base is not None:
+            print("Se indico el archivo de malla: se ignora --base (B se mide sobre la malla).")
+
+    else:
+        if arguments.base is None:
+            base = ask_base()
+        elif arguments.base in DAM_BASES:
+            base = int(arguments.base)
+        else:
+            parser.error("--base debe ser " + ", ".join(str(b) for b in DAM_BASES))
+
+        if base == DEFAULT_BASE:
+            arguments.mesh = ask_mesh()
+        else:
+            print("Para B = " + str(base) + " m solo hay malla Q8.")
+            arguments.mesh = base_mesh(base)
+
+    if not os.path.exists(arguments.mesh):
+        print("No existe el archivo de malla " + arguments.mesh + ".")
+        print("Para generar las mallas de la presa, correr: python dam_mesh.py")
+        sys.exit(1)
 
     if arguments.scale is None:
         arguments.scale = ask_scale()

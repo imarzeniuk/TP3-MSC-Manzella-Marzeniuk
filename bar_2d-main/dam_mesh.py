@@ -13,6 +13,10 @@ Se hace una grilla estructurada de nx x ny celdas: cada fila horizontal se
 reparte entre x = 0 y el paramento aguas abajo. Los cuadrilateros salen de
 cada celda; los triangulos, de partir cada celda en dos.
 
+Para el estudio del ancho de la base se generan, ademas, mallas Q8 con
+B = 24, 30 y 36 m (meshes/dam_q8_b24.mesh, etc.), con NX elegido para que los
+elementos de la base sigan midiendo 3 m de ancho.
+
 Uso, desde la carpeta que contiene a meshes/:
 
     python dam_mesh.py
@@ -23,9 +27,15 @@ H = 30.0        # altura total de la presa
 B = 18.0        # ancho de la base
 C = 3.0         # ancho de la cresta
 
+multiplicador = 2
+
 # Cantidad de celdas
-NX = 6
-NY = 24
+NX = 6 * multiplicador
+NY = 24 * multiplicador
+
+# Anchos de base del estudio de geometria (m). Con B = 18 se generan las
+# cuatro mallas de siempre; con los demas, solo Q8.
+BASE_WIDTHS = [18.0, 24.0, 30.0, 36.0]
 
 # Material (hormigon H21)
 MODEL = "plane_strain"
@@ -35,6 +45,25 @@ RHO = 2400.0
 THICKNESS = 1.0
 
 ORDER = {"T3": 1, "Q4": 1, "T6": 2, "Q8": 2}
+
+
+def nx_for_base(base):
+    """NX para un ancho de base: 6 elementos para B = 18 m y 2 mas cada 6 m
+    (elementos de 3 m de ancho en la base).
+    """
+    return NX + 2 * round((base - B) / 6.0)
+
+
+def mesh_filename(kind, base):
+    """Nombre del archivo: meshes/dam_q8.mesh para B = 18 (los de siempre) y
+    meshes/dam_q8_b24.mesh para los demas anchos.
+    """
+    name = "meshes/dam_" + kind.lower()
+
+    if base != B:
+        name = name + "_b" + format(base, "g")
+
+    return name + ".mesh"
 
 
 def midpoint(a, b):
@@ -111,12 +140,14 @@ def build_mesh(kind, nx=NX, ny=NY, base=B, crest=C, height=H):
     return nodes, elements
 
 
-def write_mesh(filename, kind, **geometry):
-    nodes, elements = build_mesh(kind, **geometry)
+def write_mesh(filename, kind, base=B):
+    nx = nx_for_base(base)
+    nodes, elements = build_mesh(kind, nx=nx, base=base)
 
     file = open(filename, "w")
 
-    file.write("# Presa de gravedad, elementos " + kind + "\n")
+    file.write("# Presa de gravedad, elementos " + kind + ", B = " + format(base, "g")
+               + " m, NX = " + str(nx) + ", NY = " + str(NY) + "\n")
     file.write("# n_nodes n_elements dim\n")
     file.write(str(len(nodes)) + " " + str(len(elements)) + " 2\n\n")
 
@@ -141,6 +172,14 @@ def write_mesh(filename, kind, **geometry):
 
 
 if __name__ == "__main__":
-    for kind in ORDER:
-        write_mesh("meshes/dam_" + kind.lower() + ".mesh", kind)
-        print("Escrita meshes/dam_" + kind.lower() + ".mesh")
+    for base in BASE_WIDTHS:
+        # Con la base actual, los cuatro tipos de elemento; con las demas, solo Q8
+        if base == B:
+            kinds = list(ORDER)
+        else:
+            kinds = ["Q8"]
+
+        for kind in kinds:
+            filename = mesh_filename(kind, base)
+            write_mesh(filename, kind, base)
+            print("Escrita", filename)
