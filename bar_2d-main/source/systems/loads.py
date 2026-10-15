@@ -29,12 +29,15 @@ def body_force_vector(element_set, materials, g):
     return f
 
 
-def hydrostatic_vector(element_set, materials, water_density, g, water_level,
-                       wall_x=0.0, tol=1.0e-9):
-    """Vector global de fuerzas por la presion del agua sobre el paramento
-    vertical x = wall_x: fe = integral N^T p(y) n t ds, con p = rho_w g (h - y)
-    por debajo del nivel h y 0 por encima. Los lados cortados por el nivel del
-    agua se integran solo en la parte mojada.
+def face_pressure_vector(element_set, materials, pressure, water_level,
+                         wall_x=0.0, tol=1.0e-9):
+    """Vector global de fuerzas por una presion pressure(y) sobre el paramento
+    vertical x = wall_x: fe = integral N^T p(y) n t ds, aplicada solo por debajo
+    de water_level. Los lados cortados por el nivel del agua se integran solo
+    en la parte mojada.
+
+    pressure es una funcion de y que devuelve la presion en Pa (positiva
+    empujando hacia adentro de la presa).
     """
     f = numpy.zeros(DOFS_PER_NODE * element_set.node_coordinates.shape[0])
 
@@ -73,12 +76,12 @@ def hydrostatic_vector(element_set, materials, water_density, g, water_level,
 
                 N = line.N(xi)
                 tangent = line.dN(xi)[0] @ coordinates
-                pressure = water_density * g * (water_level - N @ coordinates[:, 1])
+                p = pressure(N @ coordinates[:, 1])
 
                 # La presion empuja hacia adentro: p * (-ty, tx) * dxi
                 for a in range(len(edge)):
-                    fe[2 * a] = fe[2 * a] - N[a] * pressure * tangent[1] * weight * thickness
-                    fe[2 * a + 1] = fe[2 * a + 1] + N[a] * pressure * tangent[0] * weight * thickness
+                    fe[2 * a] = fe[2 * a] - N[a] * p * tangent[1] * weight * thickness
+                    fe[2 * a + 1] = fe[2 * a + 1] + N[a] * p * tangent[0] * weight * thickness
 
             dofs = element_dofs(node_ids)
 
@@ -86,3 +89,27 @@ def hydrostatic_vector(element_set, materials, water_density, g, water_level,
                 f[dofs[i]] = f[dofs[i]] + fe[i]
 
     return f
+
+
+def hydrostatic_vector(element_set, materials, water_density, g, water_level,
+                       wall_x=0.0, tol=1.0e-9):
+    """Vector global de fuerzas por la presion hidrostatica del agua sobre el
+    paramento vertical x = wall_x: p(y) = rho_w g (h - y) por debajo del nivel
+    h y 0 por encima (carga triangular).
+    """
+    def pressure(y):
+        return water_density * g * (water_level - y)
+
+    return face_pressure_vector(element_set, materials, pressure, water_level, wall_x, tol)
+
+
+def uniform_pressure_vector(element_set, materials, pressure_value, water_level,
+                            wall_x=0.0, tol=1.0e-9):
+    """Vector global de fuerzas por una presion uniforme pressure_value sobre el
+    paramento vertical x = wall_x, desde la base hasta water_level (carga
+    rectangular).
+    """
+    def pressure(y):
+        return pressure_value
+
+    return face_pressure_vector(element_set, materials, pressure, water_level, wall_x, tol)

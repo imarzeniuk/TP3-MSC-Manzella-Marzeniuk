@@ -80,13 +80,48 @@ python dam_mesh.py
 python dam.py
 ```
 
-El programa pregunta por consola el tipo de elemento (`T3`/`CST`, `T6`/`LST`, `Q4` o `Q8`) y
-el factor de escala de la deformada; con Enter se usan los valores por defecto (`Q8` y 1000).
-También se pueden pasar por la línea de comandos, y entonces no se preguntan:
+El programa pregunta por consola el tipo de elemento (`T3`/`CST`, `T6`/`LST`, `Q4` o `Q8`),
+el factor de escala de la deformada y cuántos nodos de la base liberar; con Enter se usan los
+valores por defecto (`Q8`, 1000 y 0). También se pueden pasar por la línea de comandos, y
+entonces no se preguntan:
 
 ```
-python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --freeboard 2
+python dam.py meshes/dam_t3.mesh --scale 5000 --mu 0.7 --freeboard 2 --release 1
 ```
+
+### Liberación manual de la base
+
+Donde la base queda traccionada, la presa en realidad se despega del lecho y ahí la condición
+de borde es de tracción nula. `--release N` (o la pregunta por consola) libera los N primeros
+nodos de la base contados desde el talón (x = 0); antes de preguntar se listan las x de los
+nodos de la base (en LST y Q8 incluye los nodos de mitad de lado). El procedimiento es manual:
+
+1. Correr con N = 0 (base empotrada) y mirar la tabla de contacto.
+2. Si un nodo apoyado aparece como `TRACCION`, volver a correr con N + 1.
+3. Si un nodo liberado aparece como `PENETRA` (v < 0, entra en el lecho rígido), se liberó de
+   más: volver a N − 1.
+
+Con las mallas actuales alcanza con N = 1 en CST y Q4 y con N = 2 en LST y Q8. Las resultantes
+ΣR_x, ΣR_y y M_R no cambian al liberar nodos, porque las fija el equilibrio. Al principio de
+`dam.py`, `RELEASE_MODE = "both"` libera u y v (tracción nula); con `"vertical"` se libera
+solo v y se mantiene u = 0. El `.vtu` se guarda como `results/<malla>_liberaN.vtu`.
+
+### Prueba de la deformada
+
+```
+python dam.py meshes/dam_q8.mesh --uniform-test --scale 2000
+```
+
+Sin peso propio y con una presión **uniforme** P = ρw g h / 2 sobre el paramento aguas arriba
+hasta el nivel del agua (misma resultante que la hidrostática), con la base empotrada (se
+ignora `--release`). La presa debe curvarse como una ménsula empotrada cargada en +x: en
+ParaView, los incrementos de u_x del paramento crecen con la altura. La comparación con la estática a mano
+no vale en esta prueba, así que solo se imprime el equilibrio. El `.vtu` se guarda como
+`results/<malla>_uniforme_sin_peso.vtu`.
+
+En el caso habitual (peso + agua) los incrementos de u_x decrecen con la altura: la sección es
+asimétrica y el peso de la parte superior flexiona la presa hacia aguas arriba, lo que
+compensa en parte la flexión por el agua.
 
 Fija u = v = 0 en todos los nodos de la base (y = 0), aplica el peso propio y la presión
 hidrostática, resuelve y calcula las reacciones `R = K u − f`. Imprime:
@@ -95,8 +130,10 @@ hidrostática, resuelve y calcula las reacciones `R = K u − f`. Imprime:
   (peso, empuje, momento estabilizante y desestabilizante, factor de seguridad al vuelco y
   rozamiento mínimo);
 - el equilibrio global entre reacciones y cargas;
-- una tabla con las reacciones de cada nodo de la base, marcando los nodos traccionados o
-  con `|R_x| > μ R_y`, donde el empotramiento deja de equivaler a un apoyo con rozamiento;
+- el desplazamiento de la cresta;
+- una tabla con las reacciones de cada nodo de la base, marcando los apoyados traccionados o
+  con `|R_x| > μ R_y` (donde el apoyo deja de equivaler a un contacto con rozamiento) y, para
+  los liberados, sus desplazamientos u y v y si penetran el lecho;
 - la máxima y la mínima tensión principal en los puntos de Gauss, con su ubicación y elemento.
 
 Al final escribe `results/<malla>.vtu` con la configuración deformada (`--scale` es el factor
