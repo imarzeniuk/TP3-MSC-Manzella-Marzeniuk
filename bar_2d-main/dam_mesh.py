@@ -27,7 +27,7 @@ H = 30.0        # altura total de la presa
 B = 18.0        # ancho de la base
 C = 3.0         # ancho de la cresta
 
-multiplicador = 2
+multiplicador = 1
 
 # Cantidad de celdas
 NX = 6 * multiplicador
