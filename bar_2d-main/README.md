@@ -18,8 +18,7 @@ Resuelve con la base empotrada y después con la base elástica (Robin), imprime
 dam.py          presa: resuelve y escribe los resultados
 dam_mesh.py     genera las mallas de la presa
 source/         elementos, cuadratura, malla, material, cargas, apoyos, tensiones y salida .vtu
-tests/          tests de cada módulo y patch test
+tests/          patch test (CST, LST, Q4, Q8)
 meshes/         mallas (patch test y presa)
 results/        archivos .vtu
-read_mesh/      convertidor de mallas de NX
-
+read_mesh/      convertidor de mallas de NX (No implementado)
