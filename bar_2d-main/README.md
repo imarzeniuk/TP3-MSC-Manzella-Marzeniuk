@@ -1,7 +1,6 @@
 # TP3 – MSC - Presa
 
 Elementos finitos 2D en Python (CST, LST, Q4, Q8) aplicado a una presa de gravedad.
-Autores: Tomás Manzella e Iván Marzeniuk.
 
 ## Cómo correr la presa
 
